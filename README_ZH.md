@@ -1,7 +1,7 @@
 # 软件下载
 # github加速：
 ```
-git clone https://gh-proxy.org/https://github.com/MiaAI-Lab/Qwen3.8-27B-DFlash2-EXL3-5.0bpw.git
+git clone https://gh-proxy.org/https://github.com/CaiJianling/Qwen3.8-27B-DFlash2-EXL3-5.0bpw-Windows.git
 ```
 # 模型下载
 # hf加速：
