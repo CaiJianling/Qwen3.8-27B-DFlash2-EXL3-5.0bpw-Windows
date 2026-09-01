@@ -3,3 +3,5 @@
 models/
 # runtime: server conversation log
 jobs.jsonl
+.*
+cu128whl/
