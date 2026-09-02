@@ -23,7 +23,7 @@
 | `start.ps1` | **Windows 启动脚本（本 fork 新增）**，环境驱动的 OpenAI 兼容服务器启动器 |
 | `start.sh` | Linux/macOS 启动脚本（上游原版） |
 | `stop.sh` | 停止服务器（优雅关闭，可安全重复运行） |
-| `tools/serve_openai.py` | 服务器本体（chat completions、流式、工具调用） |
+| `tools/serve_openai.py` | 服务器本体（chat completions、流式、**工具调用**） |
 | `.env.example` | 配置模板（含注释说明） |
 | `requirements.txt` | Windows 依赖清单（exllamav3 预编译 wheel + 服务依赖，**本 fork 新增**） |
 | `model-cards/` | 两个 HF 权重集的模型卡 |
@@ -107,7 +107,9 @@ cp .env.example .env      # 编辑：context、显存
 - `PORT` / `HOST` —— 服务端口（默认 8888）与绑定地址（`0.0.0.0` 为局域网可访问、无鉴权）
 - Windows 特有：`TORCH_INDEX_URL`（默认 `https://download.pytorch.org/whl/cu128`）/ `TORCH_SPEC`（默认 `torch==2.10.0+cu128`）
 
-> 并发说明：服务器一次只生成一个请求（batch-1 投机解码），并发请求自动排队。
+> **并发说明**：服务器一次只生成一个请求（batch-1 投机解码），并发请求自动排队。DGX Spark 上 `DRAFT=dflash2` 实测：8 个并发请求完全顺序执行（无批处理收益），聚合吞吐约 **16.7 tok/s**——如果你的负载是并发而非单请求，请按此规划容量。
+>
+> **推理说明**：服务器**始终会推理**，目前没有关闭它的选项；`chat_template_kwargs.enable_thinking`（vLLM/SGLang 惯例）会被静默忽略。推理轨迹通过独立的 `reasoning_content` 字段返回（完整响应和每个流式 `delta` 中都有），但**不是**独立的 token 预算——推理与可见的 `content` 共享同一个 `max_tokens`。预算过紧时（例如对短答 prompt 设 `max_tokens: 16`），可能返回完全没有 `content` 的响应（推理轨迹把预算全占掉了）。期望快速、廉价的 warmup/probe 调用时请给足预算，别以为短 `max_tokens` 就等价于短等待。
 
 ## 24 GB 显卡（RTX 3090 / 4090）
 
@@ -149,6 +151,31 @@ RTX 显卡说明（相对上述 DGX Spark 实测数据）：
 - **1M YaRN 配置放不下**：1M token 的 ~4.5-bit KV ≈ 19 GB，叠加上 15.6 GB 权重。只有 CPU spill 可触及，且 262k 本就是质量保真的极限——别指望 1M 余量在 24 GB 卡上有用
 - **x86 也请用 fork**：上游 exllamav3 可在 CUDA 上服务该模型，但 NVFP4/FP8 KV 与 DFlash2 草稿是 fork 特性；x86 请安装 fork 的 x86 CUDA 构建。Hadamard `4` / `8` / `8,4` KV 为上游能力
 - 需要超过 ~262k 的上下文？那需要 YaRN 1M 配置和超过 24 GB 卡的内存。`DRAFT=none` 也能释放草稿内存，但放弃了投机解码——`DRAFT=mtp` 在内存与速度上都已优于它
+
+## Tool calling
+
+OpenAI 风格的 `tools` / `tool_choice` 可用（仓库内容表中提及但此前未在文档中展开），实测请求/响应形态：
+
+```bash
+curl http://localhost:8888/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "qwen3.8-27b-exl3-3.5bpw-wm",
+    "messages": [{"role": "user", "content": "What is the weather in Lyon?"}],
+    "tools": [{
+      "type": "function",
+      "function": {
+        "name": "get_weather",
+        "description": "Get current weather",
+        "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}
+      }
+    }],
+    "tool_choice": "auto",
+    "max_tokens": 300
+  }'
+```
+
+返回标准 OpenAI `tool_calls` 数组（`finish_reason: "tool_calls"`、`message.content: null`），同时带常规的 `reasoning_content`。响应中的 `model` id 不一定与 `HF_TARGET_REPO` / `MODEL_DIR` 完全一致（实测 `MODEL_DIR=models/Qwen3.8-27B-EXL3-3.5bpw` 对应 `qwen3.8-27b-exl3-3.5bpw-wm`）——客户端应发的 id 以 `/v1/models` 返回为准，不要自行假设。
 
 ## 模型卡
 
