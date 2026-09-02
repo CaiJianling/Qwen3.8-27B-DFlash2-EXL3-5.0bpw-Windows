@@ -12,8 +12,9 @@
 # --- 推理引擎: exllamav3 (turboderp 官方 GitHub Release 预编译 wheel, 免编译) ---
 # pip 会从 Release 页挑选与本机匹配的 wheel (cp版本 + win_amd64)，
 # 并优先选带本地版本号的预编译构建 (如 1.4.5+cu128.torch2.10.0)。
---find-links https://github.com/turboderp-org/exllamav3/releases
-exllamav3>=1.4.5
+# `https://gh-proxy.com` 为镜像加速站
+--find-links https://gh-proxy.com/https://github.com/turboderp-org/exllamav3/releases/download/v1.4.5/exllamav3-1.4.5+cu128.torch2.10.0-cp313-cp313-win_amd64.whl
+exllamav3
 
 # --- OpenAI 兼容 HTTP 服务 (serve_openai.py 基于 aiohttp) ---
 aiohttp>=3.11.0

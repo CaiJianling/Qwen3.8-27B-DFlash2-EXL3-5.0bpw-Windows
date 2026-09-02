@@ -5,3 +5,4 @@ models/
 jobs.jsonl
 .*
 cu128whl/
+cu128whl.exe
