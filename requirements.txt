@@ -5,6 +5,7 @@
 #       (1.4.5+cu128 构建 硬性要求 torch==2.10.0)，且必须用 cu128 索引
 #       (PyPI 直装的 2.10.0 是 CPU 版，torch.cuda 不可用)：
 #         pip install torch==2.10.0+cu128 --index-url https://download.pytorch.org/whl/cu128
+#       夸克网盘链接：https://pan.quark.cn/s/34591d7d48d8
 #    2) 再装本文件其余依赖：
 #         pip install -r requirements.txt
 # ============================================================================
@@ -13,7 +14,8 @@
 # pip 会从 Release 页挑选与本机匹配的 wheel (cp版本 + win_amd64)，
 # 并优先选带本地版本号的预编译构建 (如 1.4.5+cu128.torch2.10.0)。
 # `https://gh-proxy.com` 为镜像加速站
---find-links https://gh-proxy.com/https://github.com/turboderp-org/exllamav3/releases/download/v1.4.5/exllamav3-1.4.5+cu128.torch2.10.0-cp313-cp313-win_amd64.whl
+# --find-links https://gh-proxy.com/https://github.com/turboderp-org/exllamav3/releases/download/v1.4.5/exllamav3-1.4.5+cu128.torch2.10.0-cp313-cp313-win_amd64.whl
+--find-links https://gh-proxy.com/https://github.com/turboderp-org/exllamav3/releases
 exllamav3
 
 # --- OpenAI 兼容 HTTP 服务 (serve_openai.py 基于 aiohttp) ---
