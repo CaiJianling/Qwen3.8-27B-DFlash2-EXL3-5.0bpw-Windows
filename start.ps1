@@ -1,25 +1,32 @@
-ï»¿# ============================================================================
-#  start.ps1 â€” OpenAI å…¼å®¹ exllamav3 æœåŠ¡å™¨å¯åŠ¨è„šæœ¬ (start.sh çš„ Windows ç‰ˆ)
+# ============================================================================
+#  start.ps1 ¡ª OpenAI ¼æÈİ exllamav3 ·şÎñÆ÷Æô¶¯½Å±¾ (start.sh µÄ Windows °æ)
 #
-#  é…ç½®: åŒç›®å½• .env (å¯é€‰, KEY=VALUE, å‚è€ƒ .env.example)ï¼Œæ”¹å®Œé‡å¯ç”Ÿæ•ˆã€‚
+#  ÅäÖÃ: Í¬Ä¿Â¼ .env (¿ÉÑ¡, KEY=VALUE, ²Î¿¼ .env.example)£¬¸ÄÍêÖØÆôÉúĞ§¡£
 #
-#  é¦–æ¬¡è¿è¡Œ: è‡ªåŠ¨åˆ›å»º .venv -> å®‰è£… CUDA ç‰ˆ torch 2.10 (cu128) -> å®‰è£…
-#  requirements.txt (exllamav3 å®˜æ–¹é¢„ç¼–è¯‘ wheel ~236 MB + æœåŠ¡ä¾èµ–, å…ç¼–è¯‘)ã€‚
-#  ä¹‹åæ¯æ¬¡è¿è¡Œç›´æ¥å¯åŠ¨æœåŠ¡å™¨ã€‚
-#  æ¨¡å‹ä¸ä¼šè‡ªåŠ¨ä¸‹è½½ â€” éœ€å·²å°±ä½äº MODEL_DIR (ç¼ºçœ models\Qwen3.8-27B-EXL3-3.5bpw)ã€‚
+#  Ê×´ÎÔËĞĞ: ×Ô¶¯´´½¨ .venv -> °²×° CUDA °æ torch 2.10 (cu128) -> °²×°
+#  requirements.txt (exllamav3 ¹Ù·½Ô¤±àÒë wheel ~236 MB + ·şÎñÒÀÀµ, Ãâ±àÒë)¡£
+#  Ö®ºóÃ¿´ÎÔËĞĞÖ±½ÓÆô¶¯·şÎñÆ÷¡£
+#  Ä£ĞÍ²»»á×Ô¶¯ÏÂÔØ ¡ª ĞèÒÑ¾ÍÎ»ÓÚ MODEL_DIR (È±Ê¡ models\Qwen3.8-27B-EXL3-3.5bpw)¡£
 #
-#  å¯åŠ¨:  powershell -ExecutionPolicy Bypass -File start.ps1
-#  æ’é”™:  powershell -ExecutionPolicy Bypass -File start.ps1 -SetupOnly
+#  Ö§³Öµ¥¿¨ / ¶à¿¨ÍÆÀí (.env ÅäÖÃ):
+#    GPU_SPLIT=auto               # ×Ô¶¯Ã¶¾ÙËùÓĞ GPU, °´ÊµÊ±¿ÕÏĞÏÔ´æ·ÖÅä (ÍÆ¼ö)
+#    GPU_SPLIT=13,13              # ÏÔÊ½Ã¿¿¨Ô¤Ëã (GB, Ö§³ÖĞ¡Êı) -> ¶à¿¨²ãÇĞ·Ö
+#    TENSOR_PARALLEL=1            # ÕÅÁ¿²¢ĞĞ (²»Åä GPU_SPLIT Ê±µÈÍ¬ auto)
+#    TP_BACKEND=native|nccl       # ÕÅÁ¿²¢ĞĞºó¶Ë (Ä¬ÈÏ native)
+#  Áí¿ÉÓÃ CUDA_VISIBLE_DEVICES=0,1 ÏŞÖÆ²ÎÓëÍÆÀíµÄ GPU¡£
+#
+#  Æô¶¯:  powershell -ExecutionPolicy Bypass -File start.ps1
+#  ÅÅ´í:  powershell -ExecutionPolicy Bypass -File start.ps1 -SetupOnly
 # ============================================================================
 [CmdletBinding()]
 param(
-    [switch]$SetupOnly   # åªè£…ç¯å¢ƒã€ä¸å¯åŠ¨æœåŠ¡å™¨
+    [switch]$SetupOnly   # Ö»×°»·¾³¡¢²»Æô¶¯·şÎñÆ÷
 )
 $ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath $PSScriptRoot
 $env:PYTHONIOENCODING = 'utf-8'
 
-# --- è¯»å– .env (å¯é€‰) -------------------------------------------------------
+# --- ¶ÁÈ¡ .env (¿ÉÑ¡) -------------------------------------------------------
 $cfg = @{}
 $envFile = Join-Path $PSScriptRoot '.env'
 if (Test-Path $envFile) {
@@ -34,128 +41,253 @@ function Cfg([string]$Name, [string]$Default) {
     if ($cfg.ContainsKey($Name) -and $cfg[$Name] -ne '') { return $cfg[$Name] } else { return $Default }
 }
 
-# --- é…ç½® (é”®åä¸ .env.example ä¸€è‡´) ----------------------------------------
+# --- ÅäÖÃ (¼üÃûÓë .env.example Ò»ÖÂ) ----------------------------------------
 $MODEL_DIR       = Cfg 'MODEL_DIR'       'models\Qwen3.8-27B-EXL3-3.5bpw'
 $CONTEXT_SIZE    = [int](Cfg 'CONTEXT_SIZE' '65536')
-# KV cache é‡åŒ–ä½å®½: ä¸Šæ¸¸ -cq åªæ¥å—æ•´æ•°ä½å®½ (å¦‚ '8' = fp8 KV, æˆ– '8,4' = k8/v4)ã€‚
-# é‡åŒ– cache èµ° _fns_qc dispatch è·¯å¾„ (triton åç«¯), éœ€è¦è£… triton-windowsã€‚
-# æ³¨æ„: 'nvfp4' æ˜¯ fork ä¸“æœ‰æ ¼å¼ï¼Œä¸Šæ¸¸ exllamav3 ä¸æ”¯æŒ
+# KV cache Á¿»¯Î»¿í: ÉÏÓÎ -cq Ö»½ÓÊÜÕûÊıÎ»¿í (Èç '8' = fp8 KV, »ò '8,4' = k8/v4)¡£
+# Á¿»¯ cache ×ß _fns_qc dispatch Â·¾¶ (triton ºó¶Ë), ĞèÒª×° triton-windows¡£
+# ×¢Òâ: 'nvfp4' ÊÇ fork ×¨ÓĞ¸ñÊ½£¬ÉÏÓÎ exllamav3 ²»Ö§³Ö
 $CACHE_QUANT     = Cfg 'CACHE_QUANT'     '8'
 if ($CACHE_QUANT -and $CACHE_QUANT -ne 'none' -and $CACHE_QUANT -notmatch '^\d+(,\d+)?$') {
-    Write-Warning "CACHE_QUANT='$CACHE_QUANT' æ ¼å¼æ— æ•ˆ (åº”ä¸º '8' æˆ– '8,4') â€” å¿½ç•¥æ­¤é¡¹"
+    Write-Warning "CACHE_QUANT='$CACHE_QUANT' ¸ñÊ½ÎŞĞ§ (Ó¦Îª '8' »ò '8,4') ¡ª ºöÂÔ´ËÏî"
     $CACHE_QUANT = ''
 }
 $PORT            = [int](Cfg 'PORT'      '8888')
 $BIND            = Cfg 'HOST'            '0.0.0.0'
 $CPU_CACHE_GB    = [double](Cfg 'CPU_CACHE_GB' '0')
-# torch ç‰ˆæœ¬å¿…é¡»ä¸ exllamav3 Release wheel çš„æ„å»ºå¯¹é½ (1.4.5+cu128 è¦æ±‚ torch==2.10.0)ï¼Œ
-# ä¸”è¦ç”¨ cu128 ç´¢å¼• â€”â€” PyPI ä¸Šçš„ 2.10.0 æ˜¯ CPU ç‰ˆ
+# torch °æ±¾±ØĞëÓë exllamav3 Release wheel µÄ¹¹½¨¶ÔÆë (1.4.5+cu128 ÒªÇó torch==2.10.0)£¬
+# ÇÒÒªÓÃ cu128 Ë÷Òı ¡ª¡ª PyPI ÉÏµÄ 2.10.0 ÊÇ CPU °æ
 $TORCH_INDEX_URL = Cfg 'TORCH_INDEX_URL' 'https://download.pytorch.org/whl/cu128'
 $TORCH_SPEC      = Cfg 'TORCH_SPEC'      'torch==2.10.0+cu128'
 
-# DRAFT = mtp | dflash2 | noneï¼›å…¼å®¹æ—§å†™æ³•: åªè®¾ DRAFT_DIR=none æˆ– DRAFT_DIR=<è·¯å¾„>
+# DRAFT = mtp | dflash2 | none£»¼æÈİ¾ÉĞ´·¨: Ö»Éè DRAFT_DIR=none »ò DRAFT_DIR=<Â·¾¶>
 $DRAFT_DIR = Cfg 'DRAFT_DIR' ''
 $DRAFT     = Cfg 'DRAFT'     ''
 if (-not $DRAFT) {
     if ($DRAFT_DIR -eq 'none') { $DRAFT = 'none' }
     elseif ($DRAFT_DIR)        { $DRAFT = 'dflash2' }
-    else                       { $DRAFT = 'mtp' }   # é»˜è®¤: MTP å¤´ (æ— é¢å¤–æƒé‡, ä¸Šä¸‹æ–‡/æ˜¾å­˜æ€§ä»·æ¯”æœ€é«˜)
+    else                       { $DRAFT = 'mtp' }   # Ä¬ÈÏ: MTP Í· (ÎŞ¶îÍâÈ¨ÖØ, ÉÏÏÂÎÄ/ÏÔ´æĞÔ¼Û±È×î¸ß)
 }
 $DRAFT = $DRAFT.ToLower()
 if ($DRAFT -eq 'dflash2' -and -not $DRAFT_DIR) { $DRAFT_DIR = 'models\Qwen3.8-27B-DFlash2-EXL3-5.0bpw' }
-if ($DRAFT -notin @('mtp', 'dflash2', 'none')) { throw "DRAFT å¿…é¡»æ˜¯ mtp / dflash2 / none (å½“å‰: $DRAFT)" }
+if ($DRAFT -notin @('mtp', 'dflash2', 'none')) { throw "DRAFT ±ØĞëÊÇ mtp / dflash2 / none (µ±Ç°: $DRAFT)" }
 
-# --- æ˜¾å­˜é¢„ç®—: æœªè®¾åˆ™è‡ªåŠ¨ (ç‹¬ç«‹æ˜¾å¡: VRAM/1024 - 2, åŒ start.sh) -------------
+# --- GPU Çåµ¥×Ô¶¯¼ì²â (nvidia-smi; ×ğÖØ CUDA_VISIBLE_DEVICES) ----------------
+# Ã¶¾ÙËùÓĞ NVIDIA GPU µÄÎïÀíË÷Òı/Ãû³Æ/ÏÔ´æ, ¹©µ¥¿¨Ä¬ÈÏÔ¤ËãÍÆ¶ÏÓë¶à¿¨Çåµ¥Õ¹Ê¾¡£
+# CUDA_VISIBLE_DEVICES ÈôÎªÊı×ÖË÷ÒıĞÎÊ½ (Èç "0,1") Ôò¹ıÂËÇåµ¥; UUID ĞÎÊ½²»½âÎö
+# (exllamav3/torch Ô­ÉúÖ§³Ö, auto Ä£Ê½ÎŞĞè±¾½Å±¾´¦Àí, Çåµ¥½ö×÷Õ¹Ê¾)¡£
+$gpuList = @()
+try {
+    $smiRows = @(nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader,nounits 2>$null)
+} catch { $smiRows = @() }
+foreach ($r in $smiRows) {
+    $parts = $r.Split(',', 3)
+    if ($parts.Count -ge 3 -and $parts[0].Trim() -match '^\d+$' -and $parts[2].Trim() -match '^\d+$') {
+        $vramMb = [int]$parts[2].Trim()
+        $gpuList += [pscustomobject]@{
+            idx    = [int]$parts[0].Trim()
+            name   = $parts[1].Trim()
+            vramMb = $vramMb
+            budget = [Math]::Max(8, [int][Math]::Floor($vramMb / 1024.0) - 2)
+        }
+    }
+}
+$cvd = $env:CUDA_VISIBLE_DEVICES
+if ($cvd) {
+    $visIdx = @(); $allNumeric = $true
+    foreach ($t in ($cvd -split ',')) {
+        $tt = $t.Trim()
+        if ($tt -match '^\d+$') { $visIdx += [int]$tt } else { $allNumeric = $false }
+    }
+    if ($allNumeric -and $visIdx.Count -gt 0) { $gpuList = @($gpuList | Where-Object { $visIdx -contains $_.idx }) }
+}
+if ($gpuList.Count -gt 0) {
+    Write-Host "¼ì²âµ½ $($gpuList.Count) ÕÅ GPU:"
+    foreach ($g in $gpuList) {
+        Write-Host ("  [{0}] {1}  {2} MiB (~{3} GB, ½¨ÒéÔ¤Ëã {4} GB)" -f `
+            $g.idx, $g.name, $g.vramMb, [Math]::Round($g.vramMb / 1024.0, 1), $g.budget)
+    }
+} else {
+    Write-Warning 'nvidia-smi Î´¼ì²âµ½ GPU ¡ª ×Ô¶¯¼ì²â²»¿ÉÓÃ (ÈÔ¿ÉÔÚ .env ÏÔÊ½ÉèÖÃ GPU_MEM_GB / GPU_SPLIT; ÎŞ¿¨Ê±ÒıÇæ»á×ÔĞĞ±¨´í)'
+}
+
+# --- µ¥¿¨ÏÔ´æÔ¤Ëã: Î´ÉèÔòÓÃµÚÒ»ÕÅ¿É¼û GPU (¹«Ê½Í¬ start.sh: VRAM/1024 - 2) ----
 $GPU_MEM_GB = Cfg 'GPU_MEM_GB' ''
 if (-not $GPU_MEM_GB) {
-    try { $vram = nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>$null | Select-Object -First 1 }
-    catch { $vram = $null }
-    if ($vram -match '^\d+$') { $GPU_MEM_GB = [Math]::Max(8, [int][Math]::Floor([double]$vram / 1024) - 2) }
-    else                      { $GPU_MEM_GB = 14 }
-    Write-Host "GPU_MEM_GB æœªè®¾ç½® â€” è‡ªåŠ¨æ£€æµ‹: $GPU_MEM_GB GB (å¯åœ¨ .env è¦†ç›–)"
+    if ($gpuList.Count -gt 0) {
+        $g0 = $gpuList[0]
+        $GPU_MEM_GB = $g0.budget
+        Write-Host "GPU_MEM_GB Î´ÉèÖÃ ¡ª °´ GPU [$($g0.idx)] $($g0.name) ×Ô¶¯¼ì²â: $GPU_MEM_GB GB (¿ÉÔÚ .env ¸²¸Ç)"
+    } else {
+        $GPU_MEM_GB = 14
+        Write-Warning 'GPU_MEM_GB Î´ÉèÖÃÇÒÎ´¼ì²âµ½ GPU ¡ª Ê¹ÓÃ»ØÍËÖµ 14 GB'
+    }
 }
 
-# --- é¦–æ¬¡å¼•å¯¼: åˆ›å»º venv + å®‰è£…ä¾èµ– -----------------------------------------
+# --- ¶à¿¨ (Ë«¿¨ / ¶à¿¨) ÍÆÀí ------------------------------------------------
+# GPU_SPLIT      : Ã¿ÕÅ¿¨ÏÔ´æÔ¤Ëã (GB, Ö§³ÖĞ¡Êı), ÈıÖÖĞ´·¨:
+#                    Î´ÉèÖÃ  -> µ¥¿¨ (GPU0, Ô¤ËãÈ¡ GPU_MEM_GB)
+#                    auto    -> exllamav3 Ô­Éú autosplit: ×Ô¶¯Ã¶¾ÙËùÓĞ¿É¼û GPU,
+#                               °´¸÷¿¨"ÊµÊ±¿ÕÏĞÏÔ´æ"·ÖÅä (²ãÇĞ·Ö/TP ¾ù¿É; Òì¹¹¿¨¡¢
+#                               ÓĞÆäËû½ø³ÌÕ¼ÓÃÏÔ´æÊ±Ò²×îºÏÀí)
+#                    "13,13" -> ÏÔÊ½¶à¿¨Ô¤Ëã (ÖµÊı = ¿¨Êı); ×¢Òâµ¥Öµ "13" °´ÉÏÓÎ
+#                               ÓïÒåÖ»Ê¹ÓÃ GPU0, ¶àÖµ²Å»áÆôÓÃ¶à¿¨
+# TENSOR_PARALLEL: 1/true/on/yes ÆôÓÃÕÅÁ¿²¢ĞĞ (Ä¬ÈÏ²ãÇĞ·Ö); Î´Éè GPU_SPLIT Ê±
+#                  ×Ô¶¯µÈÍ¬ GPU_SPLIT=auto¡£ÕÅÁ¿²¢ĞĞÓë MoE CPU offload »¥³â
+#                  (±¾Æô¶¯Æ÷Î´ÆôÓÃ offload, ÎŞÓ°Ïì)¡£
+# TP_BACKEND     : TP ºó¶Ë, 'native' (Ä¬ÈÏ) »ò 'nccl'¡£
+$GPU_SPLIT       = Cfg 'GPU_SPLIT'       ''
+$TENSOR_PARALLEL = Cfg 'TENSOR_PARALLEL' ''
+$TP_BACKEND      = Cfg 'TP_BACKEND'      ''
+
+# ½âÎö TENSOR_PARALLEL ²¼¶ûÖµ
+$tpEnabled = $false
+if ($TENSOR_PARALLEL) {
+    $v = $TENSOR_PARALLEL.ToLower()
+    if     ($v -in @('1','true','on','yes'))  { $tpEnabled = $true }
+    elseif ($v -in @('0','false','off','no')) { $tpEnabled = $false }
+    else { throw "TENSOR_PARALLEL='$TENSOR_PARALLEL' ÎŞĞ§ (Ó¦Îª 1/0/true/false/on/off/yes/no)" }
+}
+if ($TP_BACKEND -and $TP_BACKEND -notin @('native','nccl')) {
+    throw "TP_BACKEND='$TP_BACKEND' ÎŞĞ§ (Ó¦Îª 'native' »ò 'nccl')"
+}
+
+# ½âÎö GPU_SPLIT -> Ä£Ê½: single | auto | explicit ($splitTokens ±£ÁôÔ­Ê¼×Ö·û´®)
+$gsMode = 'single'
+$splitTokens = @()
+if ($GPU_SPLIT) {
+    if ($GPU_SPLIT.Trim().ToLower() -eq 'auto') {
+        $gsMode = 'auto'
+    } else {
+        foreach ($p in ($GPU_SPLIT -split ',')) {
+            $t = $p.Trim()
+            if ($t -notmatch '^\d+(\.\d+)?$') {
+                throw "GPU_SPLIT='$GPU_SPLIT' ¸ñÊ½ÎŞĞ§ (Ó¦Îª 'auto' »ò¶ººÅ·Ö¸ôµÄÃ¿¿¨ GB Ô¤Ëã, Èç '13,13' / '24,18.5')"
+            }
+            $splitTokens += $t
+        }
+        if ($splitTokens.Count -ge 2) { $gsMode = 'explicit' }
+        # µ¥ÖµÈÔÊÇ single: ÉÏÓÎ model_init °Ñµ¥Öµ½âÎöÎªµ¥ÔªËØÁĞ±í, Ö»»áÊ¹ÓÃ GPU0
+    }
+}
+# TP ÖÁÉÙĞèÒª 2 ÕÅ¿¨: Î´ÏÔÊ½¸øÔ¤Ëã -> auto; Ö»¸ø 1 ¸öÖµ -> ±¨´í
+if ($tpEnabled -and $gsMode -eq 'single') {
+    if ($GPU_SPLIT) {
+        throw "TENSOR_PARALLEL=1 ĞèÒª >=2 ÕÅ GPU, µ« GPU_SPLIT='$GPU_SPLIT' Ö»Ö¸¶¨ÁË 1 ¸öÔ¤Ëã (¶à¿¨ÇëĞ´ '13,13' »ò 'auto')"
+    }
+    $gsMode = 'auto'
+}
+# ÏÔÊ½Ô¤Ëã¿¨Êı > Êµ¼Ê¿É¼û¿¨Êı -> Ö±½Ó±¨´í (auto Ä£Ê½½»¸øÒıÇæ, ²»×ö´Ë¼ì²é)
+if ($gsMode -eq 'explicit' -and $gpuList.Count -gt 0 -and $splitTokens.Count -gt $gpuList.Count) {
+    throw "GPU_SPLIT Ö¸¶¨ÁË $($splitTokens.Count) ÕÅ¿¨, µ«Ö»¼ì²âµ½ $($gpuList.Count) ÕÅ¿É¼û GPU (Ë÷Òı: $($gpuList.idx -join ',')); ¿ÉÓÃ CUDA_VISIBLE_DEVICES µ÷Õû¿É¼û¿¨"
+}
+
+# ¾ö¶¨´«¸ø serve_openai.py -gs µÄÖµ
+switch ($gsMode) {
+    'auto' {
+        $gsValue = 'auto'
+        Write-Host '¶à¿¨Ä£Ê½: GPU_SPLIT=auto (exllamav3 Ô­Éú autosplit ¡ª °´¸÷¿¨ÊµÊ±¿ÕÏĞÏÔ´æ×Ô¶¯·ÖÅä)'
+    }
+    'explicit' {
+        $gsValue = $splitTokens -join ','
+        Write-Host "¶à¿¨Ä£Ê½: ÏÔÊ½Ã¿¿¨Ô¤Ëã $gsValue GB ($($splitTokens.Count) ÕÅ GPU)"
+    }
+    'single' {
+        if ($splitTokens.Count -eq 1) {
+            $gsValue = $splitTokens[0]
+            Write-Host "µ¥¿¨Ä£Ê½: GPU0 Ô¤Ëã $gsValue GB (GPU_SPLIT µ¥Öµ; ÒªÓÃ¶à¿¨ÇëĞ´ '$gsValue,$gsValue' »ò 'auto')"
+        } else {
+            $gsValue = "$GPU_MEM_GB"
+            Write-Host "µ¥¿¨Ä£Ê½: GPU0 Ô¤Ëã $gsValue GB (¶à¿¨Éè GPU_SPLIT=auto »ò GPU_SPLIT=Ô¤Ëã,Ô¤Ëã)"
+        }
+    }
+}
+if ($tpEnabled) { Write-Host "ÕÅÁ¿²¢ĞĞ: ÆôÓÃ (ºó¶Ë: $(if ($TP_BACKEND) { $TP_BACKEND } else { 'native' }))" }
+elseif ($gsMode -ne 'single') { Write-Host 'ÕÅÁ¿²¢ĞĞ: ¹Ø±Õ (Ä¬ÈÏ²ãÇĞ·Ö layer-split)' }
+
+# --- Ê×´ÎÒıµ¼: ´´½¨ venv + °²×°ÒÀÀµ -----------------------------------------
 $venvPy = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
 if (-not (Test-Path $venvPy)) {
-    Write-Host '== é¦–æ¬¡è¿è¡Œ: åˆ›å»ºè™šæ‹Ÿç¯å¢ƒ .venv (ä»…ä¸€æ¬¡) =='
+    Write-Host '== Ê×´ÎÔËĞĞ: ´´½¨ĞéÄâ»·¾³ .venv (½öÒ»´Î) =='
     python -m venv .venv
-    if (-not (Test-Path $venvPy)) { throw '.venv åˆ›å»ºå¤±è´¥ â€” è¯·ç¡®è®¤ python (3.10+) å¯ç”¨' }
+    if (-not (Test-Path $venvPy)) { throw '.venv ´´½¨Ê§°Ü ¡ª ÇëÈ·ÈÏ python (3.10+) ¿ÉÓÃ' }
 }
-# venv ä¿æŒåœ¨ PATH æœ€å‰ (ä¸å¼•æ“è¿è¡Œç›¸å…³çš„å·¥å…·ä¼˜å…ˆå‘½ä¸­)
+# venv ±£³ÖÔÚ PATH ×îÇ° (ÓëÒıÇæÔËĞĞÏà¹ØµÄ¹¤¾ßÓÅÏÈÃüÖĞ)
 $env:PATH = "$PSScriptRoot\.venv\Scripts;$env:PATH"
 
 $depsOk = (& $venvPy -c "import importlib.util as u; import sys; sys.exit(0 if all(u.find_spec(m) for m in ('torch','exllamav3','aiohttp','huggingface_hub')) else 1)")
 if ($depsOk -ne 0) {
-    Write-Host '== å®‰è£…ä¾èµ– (é¦–æ¬¡è¾ƒæ…¢: torch ~2.5 GB + exllamav3 wheel ~236 MB) =='
+    Write-Host '== °²×°ÒÀÀµ (Ê×´Î½ÏÂı: torch ~2.5 GB + exllamav3 wheel ~236 MB) =='
     & $venvPy -c "import importlib.util as u; import sys; sys.exit(0 if u.find_spec('torch') else 1)"
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "   [1/2] $TORCH_SPEC (CUDA, ç´¢å¼•: $TORCH_INDEX_URL) ..."
-        # æ¸…ç©ºå…¨å±€ extra-index-urlï¼Œé¿å…é•œåƒæºæ··å…¥ CPU ç‰ˆ torch
+        Write-Host "   [1/2] $TORCH_SPEC (CUDA, Ë÷Òı: $TORCH_INDEX_URL) ..."
+        # Çå¿ÕÈ«¾Ö extra-index-url£¬±ÜÃâ¾µÏñÔ´»ìÈë CPU °æ torch
         $env:PIP_EXTRA_INDEX_URL = ''
         & $venvPy -m pip install $TORCH_SPEC --index-url $TORCH_INDEX_URL
         Remove-Item Env:\PIP_EXTRA_INDEX_URL -ErrorAction SilentlyContinue
-        if ($LASTEXITCODE -ne 0) { throw "torch å®‰è£…å¤±è´¥ (ç´¢å¼• $TORCH_INDEX_URL) â€” å¯åœ¨ .env æ¢ TORCH_INDEX_URL / TORCH_SPEC" }
+        if ($LASTEXITCODE -ne 0) { throw "torch °²×°Ê§°Ü (Ë÷Òı $TORCH_INDEX_URL) ¡ª ¿ÉÔÚ .env »» TORCH_INDEX_URL / TORCH_SPEC" }
     }
-    Write-Host '   [2/2] requirements.txt (exllamav3 é¢„ç¼–è¯‘ wheel + æœåŠ¡ä¾èµ–) ...'
+    Write-Host '   [2/2] requirements.txt (exllamav3 Ô¤±àÒë wheel + ·şÎñÒÀÀµ) ...'
     & $venvPy -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-    if ($LASTEXITCODE -ne 0) { throw 'ä¾èµ–å®‰è£…å¤±è´¥ (è¯¦è§ä¸Šæ–¹ pip è¾“å‡º)' }
-    Write-Host '== ä¾èµ–å®‰è£…å®Œæˆ =='
+    if ($LASTEXITCODE -ne 0) { throw 'ÒÀÀµ°²×°Ê§°Ü (Ïê¼ûÉÏ·½ pip Êä³ö)' }
+    Write-Host '== ÒÀÀµ°²×°Íê³É =='
 }
 
-# --- è¡¥ä¸: exllamav3 1.4.5 åœ¨ Windows æ—  triton æ—¶çš„ä¸¤ä¸ª bug ----------------
-# Bug 1: dsa_triton.py çš„ kernel å®šä¹‰åœ¨ if has_triton: å—å†…, æ—  triton æ—¶
-#        bc_dsa.py çš„ top-level import ä¼šå´©æºƒ (é DeepSeek-V4 æ¨¡å‹ä¸è¯¥è§¦å‘)
-# Bug 2: torch.py çš„ fn_torch_sdpa_fallback_cache è¦æ±‚ dim >= 512 (bighead),
-#        æ™®é€š head dim (å¦‚ 128) åœ¨æ—  triton æ—¶æ²¡æœ‰å¯ç”¨ attention åç«¯
-# åªåœ¨å°šæœªæ‰“è¡¥ä¸æ—¶æ‰§è¡Œ (å¹‚ç­‰; é‡è£… exllamav3 åè‡ªåŠ¨é‡æ‰“)
+# --- ²¹¶¡: exllamav3 1.4.5 ÔÚ Windows ÎŞ triton Ê±µÄÁ½¸ö bug ----------------
+# Bug 1: dsa_triton.py µÄ kernel ¶¨ÒåÔÚ if has_triton: ¿éÄÚ, ÎŞ triton Ê±
+#        bc_dsa.py µÄ top-level import »á±ÀÀ£ (·Ç DeepSeek-V4 Ä£ĞÍ²»¸Ã´¥·¢)
+# Bug 2: torch.py µÄ fn_torch_sdpa_fallback_cache ÒªÇó dim >= 512 (bighead),
+#        ÆÕÍ¨ head dim (Èç 128) ÔÚÎŞ triton Ê±Ã»ÓĞ¿ÉÓÃ attention ºó¶Ë
+# Ö»ÔÚÉĞÎ´´ò²¹¶¡Ê±Ö´ĞĞ (ÃİµÈ; ÖØ×° exllamav3 ºó×Ô¶¯ÖØ´ò)
 $dsaTriton = Join-Path $PSScriptRoot '.venv\Lib\site-packages\exllamav3\modules\attention_fn\dsa_triton.py'
 $torchFn   = Join-Path $PSScriptRoot '.venv\Lib\site-packages\exllamav3\modules\attention_fn\torch.py'
 if ((Test-Path $dsaTriton) -and -not (Select-String -Path $dsaTriton -Pattern 'No triton: define placeholder' -Quiet)) {
     $c = Get-Content $dsaTriton -Raw
     $c = $c -replace '(        tl\.store\(out \+ r \* K_pad \+ offs, v, mask = offs < K_pad\)\n\ndef dsa_attn\()', "`$1`nelse:`n    # No triton: define placeholder names so bc_dsa.py's top-level import`n    # does not crash at module load time (DSA paths are never used by`n    # non-DeepSeek-V4 models like Qwen3.8)`n    _dsa_attn_kernel = None`n    _dsa_attn_split_kernel = None`n    _dsa_attn_combine_kernel = None`n    _dsa_indexer_kernel = None`n    _dsa_indexer_fewq_kernel = None`n    _dsa_pool_update_kernel = None`n    _dsa_pool_expand_kernel = None`n`ndef dsa_attn("
     Set-Content -Path $dsaTriton -Value $c -NoNewline
-    Write-Host 'å·²æ‰“è¡¥ä¸: dsa_triton.py (æ—  triton æ—¶çš„ import ä¿®å¤)'
+    Write-Host 'ÒÑ´ò²¹¶¡: dsa_triton.py (ÎŞ triton Ê±µÄ import ĞŞ¸´)'
 }
 if ((Test-Path $torchFn) -and (Select-String -Path $torchFn -Pattern 'args\.dim < 512' -Quiet)) {
     $c = Get-Content $torchFn -Raw
     $c = $c -replace '        args\.dim < 512 or\n', ''
     Set-Content -Path $torchFn -Value $c -NoNewline
-    Write-Host 'å·²æ‰“è¡¥ä¸: torch.py (SDPA fallback æ”¯æŒæ‰€æœ‰ head dim)'
+    Write-Host 'ÒÑ´ò²¹¶¡: torch.py (SDPA fallback Ö§³ÖËùÓĞ head dim)'
 }
-if ($SetupOnly) { Write-Host '-SetupOnly: ç¯å¢ƒå°±ç»ªï¼Œè·³è¿‡å¯åŠ¨ã€‚'; exit 0 }
+if ($SetupOnly) { Write-Host '-SetupOnly: »·¾³¾ÍĞ÷£¬Ìø¹ıÆô¶¯¡£'; exit 0 }
 
-# --- Triton ç¼“å­˜ç›®å½• (é¿å… %USERPROFILE%\.triton æƒé™é—®é¢˜) -----------------
+# --- Triton »º´æÄ¿Â¼ (±ÜÃâ %USERPROFILE%\.triton È¨ÏŞÎÊÌâ) -----------------
 $env:TRITON_CACHE_DIR = Join-Path $PSScriptRoot '.triton-cache'
 New-Item -ItemType Directory -Path $env:TRITON_CACHE_DIR -Force | Out-Null
 
-# --- æ¨¡å‹æ£€æŸ¥ (ä¸è‡ªåŠ¨ä¸‹è½½) ---------------------------------------------------
+# --- Ä£ĞÍ¼ì²é (²»×Ô¶¯ÏÂÔØ) ---------------------------------------------------
 if (-not [IO.Path]::IsPathRooted($MODEL_DIR)) { $MODEL_DIR = Join-Path $PSScriptRoot $MODEL_DIR }
-if (-not (Test-Path (Join-Path $MODEL_DIR 'config.json'))) { throw "æ¨¡å‹ç›®å½•ç¼ºå°‘ config.json: $MODEL_DIR (è¯·å…ˆä¸‹è½½æ¨¡å‹)" }
-if (-not (Get-ChildItem $MODEL_DIR -Filter *.safetensors -ErrorAction SilentlyContinue)) { throw "æ¨¡å‹ç›®å½•ç¼ºå°‘ *.safetensors: $MODEL_DIR" }
-Write-Host "ç›®æ ‡æ¨¡å‹: $MODEL_DIR (å·²å°±ä½ï¼Œè·³è¿‡ä¸‹è½½)"
+if (-not (Test-Path (Join-Path $MODEL_DIR 'config.json'))) { throw "Ä£ĞÍÄ¿Â¼È±ÉÙ config.json: $MODEL_DIR (ÇëÏÈÏÂÔØÄ£ĞÍ)" }
+if (-not (Get-ChildItem $MODEL_DIR -Filter *.safetensors -ErrorAction SilentlyContinue)) { throw "Ä£ĞÍÄ¿Â¼È±ÉÙ *.safetensors: $MODEL_DIR" }
+Write-Host "Ä¿±êÄ£ĞÍ: $MODEL_DIR (ÒÑ¾ÍÎ»£¬Ìø¹ıÏÂÔØ)"
 
-# ä¸Šä¸‹æ–‡è¶…è¿‡åŸç”Ÿ 262144 éœ€åˆ‡æ¢ YaRN é…ç½® (åŒ start.sh)
+# ÉÏÏÂÎÄ³¬¹ıÔ­Éú 262144 ĞèÇĞ»» YaRN ÅäÖÃ (Í¬ start.sh)
 if ($CONTEXT_SIZE -gt 262144) {
     $yarnCfg = Join-Path $MODEL_DIR 'config.yarn-1m.json'
     $mainCfg = Join-Path $MODEL_DIR 'config.json'
     if ((Test-Path $yarnCfg) -and -not (Select-String -Path $mainCfg -Pattern 'rope_scaling' -Quiet)) {
         Copy-Item $yarnCfg $mainCfg -Force
-        Write-Host "CONTEXT_SIZE > 262k: config.json å·²åˆ‡æ¢ä¸º YaRN 1M å˜ä½“"
+        Write-Host "CONTEXT_SIZE > 262k: config.json ÒÑÇĞ»»Îª YaRN 1M ±äÌå"
     }
 }
 if ($DRAFT -eq 'dflash2') {
     if (-not [IO.Path]::IsPathRooted($DRAFT_DIR)) { $DRAFT_DIR = Join-Path $PSScriptRoot $DRAFT_DIR }
-    if (-not (Test-Path (Join-Path $DRAFT_DIR 'config.json'))) { throw "DFlash2 è‰ç¨¿æ¨¡å‹ç¼ºå¤±: $DRAFT_DIR (è¯·å…ˆä¸‹è½½)" }
+    if (-not (Test-Path (Join-Path $DRAFT_DIR 'config.json'))) { throw "DFlash2 ²İ¸åÄ£ĞÍÈ±Ê§: $DRAFT_DIR (ÇëÏÈÏÂÔØ)" }
 }
 
-# --- ç»„è£… serve_openai.py å¯åŠ¨å‚æ•° ------------------------------------------
+# --- ×é×° serve_openai.py Æô¶¯²ÎÊı ------------------------------------------
 $serverArgs = @('-u', (Join-Path $PSScriptRoot 'tools\serve_openai.py'),
                 '-m', $MODEL_DIR,
-                '-gs', "$GPU_MEM_GB",
+                '-gs', $gsValue,
                 '-cs', "$CONTEXT_SIZE",
                 '--host', $BIND,
                 '--port', "$PORT")
+if ($tpEnabled)                      { $serverArgs += @('-tp') }
+if ($TP_BACKEND)                    { $serverArgs += @('-tpb', $TP_BACKEND) }
 if ($CACHE_QUANT -and $CACHE_QUANT -ne 'none') { $serverArgs += @('-cq', $CACHE_QUANT) }
 switch ($DRAFT) {
     'mtp'     { $serverArgs += @('-dm', 'mtp') }
@@ -164,7 +296,7 @@ switch ($DRAFT) {
 }
 if ($CPU_CACHE_GB -gt 0) { $serverArgs += @('-ccs', "$CPU_CACHE_GB") }
 
-Write-Host ("å¯åŠ¨: " + ($serverArgs -join ' '))
-Write-Host "å°±ç»ªåå¯æµ‹è¯•: curl http://localhost:$PORT/health"
+Write-Host ("Æô¶¯: " + ($serverArgs -join ' '))
+Write-Host "¾ÍĞ÷ºó¿É²âÊÔ: curl http://localhost:$PORT/health"
 & $venvPy @serverArgs
 exit $LASTEXITCODE

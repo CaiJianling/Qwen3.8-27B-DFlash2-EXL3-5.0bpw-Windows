@@ -15,7 +15,7 @@
 # 并优先选带本地版本号的预编译构建 (如 1.4.5+cu128.torch2.10.0)。
 # `https://gh-proxy.com` 为镜像加速站
 # --find-links https://gh-proxy.com/https://github.com/turboderp-org/exllamav3/releases/download/v1.4.5/exllamav3-1.4.5+cu128.torch2.10.0-cp313-cp313-win_amd64.whl
---find-links https://gh-proxy.com/https://github.com/turboderp-org/exllamav3/releases
+--find-links https://v4.gh-proxy.org/https://github.com/turboderp-org/exllamav3/releases/download/v1.4.5/exllamav3-1.4.5+cu128.torch2.10.0-cp313-cp313-win_amd64.whl
 exllamav3
 
 # --- OpenAI 兼容 HTTP 服务 (serve_openai.py 基于 aiohttp) ---
@@ -23,6 +23,11 @@ aiohttp>=3.11.0
 
 # --- Hugging Face Hub (tokenizer/模型加载辅助) ---
 huggingface_hub>=0.27.0
+
+# --- transformers (exllamav3 tokenizer.hf_chat_template 套用聊天模板时需要) ---
+# 不装时 chat/completions 接口会在套用 HF chat template 时报
+# ModuleNotFoundError: No module named 'transformers'
+transformers>=4.46.0
 
 # --- Triton (Windows 版, exllamav3 的 paged attention / 量化 cache 后端) ---
 # 不装时量化 cache (-cq) 和 triton attention 路径不可用, 只能走 torch SDPA 兜底

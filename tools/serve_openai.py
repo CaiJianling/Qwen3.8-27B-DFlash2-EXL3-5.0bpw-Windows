@@ -33,6 +33,21 @@ Tool calling (Qwen3.8 XML format):
 Launch (from repo root):
   .venv/bin/python tools/serve_openai.py \
       -m models/Qwen3.8-27B-EXL3-3.5bpw -gs 22 -cs 262144 -cq nvfp4 --port 8888
+
+Multi-GPU (e.g. two 24 GB cards):
+  # Native autosplit: exllamav3 measures each device's free VRAM and splits
+  # automatically (handles heterogeneous cards / other processes' usage)
+  -gs auto
+  # Explicit per-device budgets, layer split (default)
+  -gs 22,22
+  # Tensor parallel: weights split across devices per layer (often faster,
+  # but incompatible with --moe_cpu_offload / --moe_cpu_split)
+  -gs 22,22 -tp            # native backend (default)
+  -gs 22,22 -tp -tpb nccl  # NCCL backend
+  # TP with autosplit (all visible GPUs, budgets derived from free VRAM)
+  -gs auto -tp
+Note: a single value ('-gs 22') means GPU0 only — the CLI value is parsed as
+a list upstream, so multi-GPU requires either 'auto' or >= 2 comma values.
 """
 import argparse, json, os, re, sys, time, threading, uuid
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -584,7 +599,21 @@ def main():
                     help = "Draft model path, 'mtp' for MTP drafting (head inside the "
                            "main checkpoint: no extra weights, much smaller KV footprint) "
                            "or 'none' to disable drafting")
-    ap.add_argument("-gs", "--grid_size", type = int, default = 110)
+    ap.add_argument("-gs", "--grid_size", type = str, default = "110",
+                    help = "GPU memory budget per device in GB. '22' = single GPU "
+                           "(GPU0 only); '22,22' = multi-GPU with per-device budgets "
+                           "(floats accepted, number of values = number of GPUs); "
+                           "'auto' = exllamav3 native autosplit across all visible "
+                           "GPUs using their current free VRAM (works with layer-split "
+                           "and tensor-parallel).")
+    ap.add_argument("-tp", "--tensor_parallel", action = "store_true",
+                    help = "Load model in tensor-parallel mode across the GPUs implied "
+                           "by --grid_size (e.g. '22,22' -> 2-way TP). Often faster than "
+                           "the default layer-split, but incompatible with "
+                           "--moe_cpu_offload / --moe_cpu_split.")
+    ap.add_argument("-tpb", "--tp_backend", type = str, default = None,
+                    help = "Tensor-parallel backend: 'native' (default) or 'nccl'. "
+                           "Only meaningful with --tensor_parallel.")
     ap.add_argument("-cs", "--cache_size", type = int, default = 65536,
                     help = "KV cache size in tokens (default 65536; 8192 default "
                            "of model_init is too small for large tool sets)")
@@ -605,11 +634,15 @@ def main():
     use_mtp = _draft == "mtp"
     use_draft = _draft not in ("none", "", "-")
     argv = ["-m", args.model,
-            "-gs", str(args.grid_size), "-cs", str(args.cache_size)]
+            "-gs", args.grid_size, "-cs", str(args.cache_size)]
     if use_mtp:
         argv += ["-mtp"]
     elif use_draft:
         argv += ["-dm", args.draft_model]
+    if args.tensor_parallel:
+        argv += ["-tp"]
+    if args.tp_backend:
+        argv += ["-tpb", args.tp_backend]
     if args.cache_quant:
         argv += ["-cq", args.cache_quant]
     if args.cpu_cache_size:

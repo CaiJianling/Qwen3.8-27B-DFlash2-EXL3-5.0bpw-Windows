@@ -58,7 +58,7 @@ git clone https://gh-proxy.org/https://github.com/CaiJianling/Qwen3.8-27B-DFlash
 ### 3. 下载模型（Hugging Face 加速）
 
 ```powershell
-$env:HF_ENDPOINT="https://hf-cdn.sufy.com"
+$env:HF_ENDPOINT="https://hf-mirror.com"
 hf download Mia-AiLab/Qwen3.8-27B-EXL3-3.5bpw `
  --local-dir ./models/Qwen3.8-27B-EXL3-3.5bpw `
  --max-workers 6
@@ -74,6 +74,9 @@ powershell -ExecutionPolicy Bypass -File start.ps1
 ```
 
 - **首次运行**：自动创建 `.venv` → 安装 CUDA 版 torch 2.10（cu128 索引）→ 安装 `requirements.txt`（exllamav3 预编译 wheel ~236 MB + 服务依赖，**免编译**）
+```powershell
+pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+```
 - **之后每次**：直接启动服务器
 - 就绪后自测：`curl http://localhost:8888/health`
 
@@ -82,7 +85,8 @@ powershell -ExecutionPolicy Bypass -File start.ps1
 - **自动引导**：首次运行创建 `.venv` 并安装依赖；缺依赖时自动补齐，之后直接启动
 - **免编译**：exllamav3 通过 GitHub Release 预编译 wheel 安装（`--find-links` 走 gh-proxy 镜像加速），无需本地编译 CUDA kernel
 - **自动打补丁**：修复 exllamav3 1.4.5 在 Windows 无 triton 时的两个 bug（`dsa_triton.py` 顶层 import 崩溃；`torch.py` SDPA fallback 的 `dim ≥ 512` 限制），幂等、重装引擎后自动重打
-- **自动检测显存**：`GPU_MEM_GB` 未设置时按 `VRAM/1024 − 2` 自动推断（可用 `nvidia-smi` 查询）
+- **自动检测显存**：启动时枚举所有可见 GPU（索引/名称/显存，尊重 `CUDA_VISIBLE_DEVICES`）并打印清单；`GPU_MEM_GB` 未设置时按第一张可见卡的 `VRAM/1024 − 2`（最低 8 GB）自动推断
+- **多卡推理**：`GPU_SPLIT=auto` 走 exllamav3 原生 autosplit（按各卡实时空闲显存自动分配），或 `GPU_SPLIT=13,13` 显式指定每卡预算；`TENSOR_PARALLEL=1` 开启张量并行（详见[下方多卡章节](#多卡推理双卡--多卡)）
 - **排错开关**：`powershell -ExecutionPolicy Bypass -File start.ps1 -SetupOnly` 只装环境、不启动服务器
 - **依赖约束**：torch 必须为 `torch==2.10.0+cu128` 且从 cu128 索引安装（PyPI 直装是 CPU 版，`torch.cuda` 不可用；且装 exllamav3 时 PyPI 会把 torch 静默替换成 CPU 版）
 - **Triton 缓存**：`TRITON_CACHE_DIR` 指向仓库内 `.triton-cache`，避免 `%USERPROFILE%\.triton` 的权限问题
@@ -102,7 +106,11 @@ cp .env.example .env      # 编辑：context、显存
 - `CONTEXT_SIZE` —— KV cache 大小（token）。原生上限 262,144；设为更大值会自动切换 YaRN 配置变体（1M 可用）
 - `CACHE_QUANT` —— KV 格式：`none`（fp16）/ `8` / `8,4` / `4` / `fp8` / `nvfp4`。`nvfp4` 与 `fp8` 需要 compute capability ≥ 8.9（Ada 4090、Hopper、Blackwell / GB10）；Ampere（3090, sm_86）无法编译这些 Triton kernel，请用 Hadamard `4`（~4.5 bits/elem）或 `8` / `8,4`
   > **Windows 差异**：上游 exllamav3 的 `-cq` 只接受整数位宽（`8` = fp8 KV，`8,4` = k8/v4）；`nvfp4` 是 fork 专有格式，**上游 wheel 不支持**。量化 cache 走 triton 后端，需要 `triton-windows`（已列入 `requirements.txt`）。start.ps1 默认 `CACHE_QUANT=8`。
-- `GPU_MEM_GB` —— 权重 + cache 的显存预算；未设置时自动检测（独立显卡：VRAM − 2 GB，最低 8 GB）
+- `GPU_MEM_GB` —— 单卡模式（默认）下权重 + cache 的显存预算；未设置时按第一张可见 GPU 自动检测（VRAM − 2 GB，最低 8 GB）
+- `GPU_SPLIT` —— 多卡配置：`auto`（exllamav3 原生 autosplit，按各卡实时空闲显存自动分配，推荐）或逗号分隔的每卡预算（如 `13,13`、`24,18.5`；值数 = 卡数）。**注意单值 `13` 按上游语义只使用 GPU0**，多卡必须写 `auto` 或 ≥2 个值
+- `TENSOR_PARALLEL` —— `1/true` 开启张量并行（默认层切分）；未配 `GPU_SPLIT` 时自动等同 `auto`。与 MoE CPU offload 互斥（本启动器未启用）
+- `TP_BACKEND` —— 张量并行后端：`native`（默认）/ `nccl`，仅张量并行时有效
+- 多卡选卡：设置环境变量 `CUDA_VISIBLE_DEVICES=0,1` 限制参与推理的物理卡（启动器的 GPU 清单与引擎均尊重该变量）
 - `CPU_CACHE_GB` —— CPU 二级缓存（已接受但暂未生效，保持 0）
 - `PORT` / `HOST` —— 服务端口（默认 8888）与绑定地址（`0.0.0.0` 为局域网可访问、无鉴权）
 - Windows 特有：`TORCH_INDEX_URL`（默认 `https://download.pytorch.org/whl/cu128`）/ `TORCH_SPEC`（默认 `torch==2.10.0+cu128`）
@@ -151,6 +159,75 @@ RTX 显卡说明（相对上述 DGX Spark 实测数据）：
 - **1M YaRN 配置放不下**：1M token 的 ~4.5-bit KV ≈ 19 GB，叠加上 15.6 GB 权重。只有 CPU spill 可触及，且 262k 本就是质量保真的极限——别指望 1M 余量在 24 GB 卡上有用
 - **x86 也请用 fork**：上游 exllamav3 可在 CUDA 上服务该模型，但 NVFP4/FP8 KV 与 DFlash2 草稿是 fork 特性；x86 请安装 fork 的 x86 CUDA 构建。Hadamard `4` / `8` / `8,4` KV 为上游能力
 - 需要超过 ~262k 的上下文？那需要 YaRN 1M 配置和超过 24 GB 卡的内存。`DRAFT=none` 也能释放草稿内存，但放弃了投机解码——`DRAFT=mtp` 在内存与速度上都已优于它
+
+## 多卡推理（双卡 / 多卡）
+
+`start.ps1`（Windows）支持多卡，无需改命令行——在 `.env` 里配置即可。底层透传给 exllamav3 的 `-gs/--gpu_split` 与 `-tp/--tensor_parallel` 参数。
+
+### 1. 启动时自动检测 GPU
+
+脚本启动时会枚举所有可见 GPU（经 `nvidia-smi`，尊重 `CUDA_VISIBLE_DEVICES`）并打印清单，例如本机 2 × RTX A4000（16 GB）：
+
+```
+检测到 2 张 GPU:
+  [0] NVIDIA RTX A4000  16376 MiB (~16.0 GB, 建议预算 13 GB)
+  [1] NVIDIA RTX A4000  16376 MiB (~16.0 GB, 建议预算 13 GB)
+```
+
+默认仍是**单卡模式**（只用 GPU0，预算取 `GPU_MEM_GB`，未设则按第一张卡的 `VRAM − 2 GB` 推断）——多卡必须显式开启。
+
+### 2. 两种切分方式
+
+| 方式 | 说明 | 配置 |
+|---|---|---|
+| **层切分**（默认） | 连续的 transformer 层放到不同卡上（如 0–15 层在 GPU0，16–31 层在 GPU1）。最稳、显存利用率高，无额外通信 kernel 要求 | `GPU_SPLIT=auto` 或 `13,13` |
+| **张量并行** | 每层权重按列/行切到多张卡，每层前向都跨卡通信。通常延迟更低、更快，但依赖跨卡通信；与 `moe_cpu_offload/split` 互斥（本启动器未启用） | 再加 `TENSOR_PARALLEL=1` |
+
+### 3. 三种配置写法（`.env`）
+
+```bash
+# ① 自动多卡，层切分（推荐首选）——引擎按各卡"实时空闲显存"自动分配，
+#    异构卡（如 24G+16G）、有其他程序占显存时也最合理
+GPU_SPLIT=auto
+
+# ② 显式每卡预算（GB，支持小数；值的个数必须等于卡数，否则启动报错）
+GPU_SPLIT=13,13          # 两张 16 GB 卡
+# GPU_SPLIT=24,18.5      # 异构卡示例
+
+# ③ 张量并行（不配 GPU_SPLIT 时自动等同 GPU_SPLIT=auto）
+TENSOR_PARALLEL=1
+# TP_BACKEND=native      # 默认；需要时可改 nccl
+```
+
+最终下发给引擎的参数会在启动日志中打印，可直接确认：
+
+```
+多卡模式: GPU_SPLIT=auto (exllamav3 原生 autosplit — 按各卡实时空闲显存自动分配)
+启动: ... tools\serve_openai.py -m ... -gs auto -cs 65536 --host 0.0.0.0 --port 8888 -dm mtp
+```
+
+### 4. 选择参与推理的卡
+
+用标准的 `CUDA_VISIBLE_DEVICES` 环境变量（启动器清单与 exllamav3/torch 均尊重）：
+
+```powershell
+# 只用物理卡 0 和 1（PowerShell 当前会话）
+$env:CUDA_VISIBLE_DEVICES="0,1"
+powershell -ExecutionPolicy Bypass -File start.ps1
+
+# 只用物理卡 1
+$env:CUDA_VISIBLE_DEVICES="1"
+powershell -ExecutionPolicy Bypass -File start.ps1
+```
+
+### 5. 注意事项
+
+- **单值 = 只用 GPU0**：`GPU_SPLIT=13`（或 `GPU_MEM_GB=13`）会被上游解析为单元素预算列表，**只使用 GPU0**。多卡必须写 `auto` 或 ≥2 个逗号分隔的值。
+- **MTP / DFlash2 草稿均可与多卡组合**，无需额外配置；`DRAFT=mtp`（默认）在多卡下依然是显存性价比最高的选择。
+- **KV cache 预算随卡数翻倍**：`CONTEXT_SIZE` 是所有卡上 KV cache 的总 token 容量上限，多卡下可容纳的上下文近似随卡数增长。例如 2 × 16 GB 卡 + `CACHE_QUANT=8`，可把 `CONTEXT_SIZE` 设得比单卡明显更大（按实际加载日志中 cache 占用调整）。
+- **张量并行要求模型架构支持**（Qwen3.8 支持）；若引擎报 `Tensor-parallel is not currently implemented for ...`，退回层切分即可。
+- **验证是否真的用上多卡**：加载完成后另开终端执行 `nvidia-smi`，应看到两张卡都有常驻显存占用；也可 `curl http://localhost:8888/health` 确认服务就绪。
+- 先试 **层切分 `auto`**，追求更低延迟再试 `TENSOR_PARALLEL=1`，两种模式都能随时改 `.env` 重启切换。
 
 ## Tool calling
 

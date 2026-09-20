@@ -24,3 +24,16 @@ where cl
 ```
 ./start.ps1
 ```
+# 多卡推理（双卡/多卡，详见 README.md「多卡推理」章节）
+# 启动时会自动列出检测到的 GPU（索引/名称/显存）。在 `.env` 中配置：
+```
+GPU_SPLIT=auto            # 推荐：引擎按各卡实时空闲显存自动分配（层切分）
+# GPU_SPLIT=13,13         # 或显式指定每卡预算(GB, 支持小数)，值数=卡数
+# TENSOR_PARALLEL=1       # 张量并行（默认层切分；不配 GPU_SPLIT 时自动等同 auto）
+```
+# 注意：GPU_SPLIT=13（单值）只使用 GPU0；多卡必须写 auto 或 13,13 这样的多值。
+# 只让部分物理卡参与推理：
+```
+$env:CUDA_VISIBLE_DEVICES="0,1"
+./start.ps1
+```
