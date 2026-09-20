@@ -49,7 +49,8 @@ $passThroughKeys = @('HF_TOKEN','HF_HOME','HF_HUB_CACHE','HF_HUB_OFFLINE',
                       'EXL3_MOE_CPU_THREADS','EXL3_MOE_CPU_SWAP')
 foreach ($k in $passThroughKeys) {
     $v = Cfg $k ''
-    if ($v -and -not $env:$k) { Set-Item -Path "Env:$k" -Value $v }
+    $cur = [Environment]::GetEnvironmentVariable($k)
+    if ($v -and -not $cur) { Set-Item -Path "Env:$k" -Value $v }
 }
 
 # --- ≈‰÷√ (º¸√˚”Î .env.example “ª÷¬) ----------------------------------------
