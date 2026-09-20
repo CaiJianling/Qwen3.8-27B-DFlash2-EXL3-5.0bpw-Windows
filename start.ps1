@@ -41,6 +41,17 @@ function Cfg([string]$Name, [string]$Default) {
     if ($cfg.ContainsKey($Name) -and $cfg[$Name] -ne '') { return $cfg[$Name] } else { return $Default }
 }
 
+# --- 环境变量透传 (.env 中 start.ps1 不显式处理、但引擎/HF 可能需要的键) ----
+# 这些键读入 $cfg 后如果不导出到 $env:，子进程 (python/引擎/HF) 看不到。
+# HF_TOKEN 在模型/tokenizer 需要鉴权时尤其关键。
+$passThroughKeys = @('HF_TOKEN','HF_HOME','HF_HUB_CACHE','HF_HUB_OFFLINE',
+                      'HUGGING_FACE_HUB_TOKEN','TRANSFORMERS_OFFLINE',
+                      'EXL3_MOE_CPU_THREADS','EXL3_MOE_CPU_SWAP')
+foreach ($k in $passThroughKeys) {
+    $v = Cfg $k ''
+    if ($v -and -not $env:$k) { Set-Item -Path "Env:$k" -Value $v }
+}
+
 # --- 配置 (键名与 .env.example 一致) ----------------------------------------
 $MODEL_DIR       = Cfg 'MODEL_DIR'       'models\Qwen3.8-27B-EXL3-3.5bpw'
 $CONTEXT_SIZE    = [int](Cfg 'CONTEXT_SIZE' '65536')
@@ -295,6 +306,19 @@ switch ($DRAFT) {
     'none'    { $serverArgs += @('-dm', 'none') }
 }
 if ($CPU_CACHE_GB -gt 0) { $serverArgs += @('-ccs', "$CPU_CACHE_GB") }
+
+# --- 配置摘要 (让用户一眼确认 .env 各字段是否生效) -------------------------
+Write-Host '== 配置摘要 (来源: .env 或默认值) =='
+Write-Host "  MODEL_DIR     = $MODEL_DIR"
+Write-Host "  CONTEXT_SIZE  = $CONTEXT_SIZE"
+Write-Host "  CACHE_QUANT   = $(if ($CACHE_QUANT) { $CACHE_QUANT } else { 'none' })"
+Write-Host "  PORT          = $PORT"
+Write-Host "  HOST          = $BIND"
+Write-Host "  DRAFT         = $DRAFT$(if ($DRAFT -eq 'dflash2') { " ($DRAFT_DIR)" })"
+Write-Host "  GPU_SPLIT     = $gsValue$(if ($tpEnabled) { ' + TP' } elseif ($gsMode -ne 'single') { ' (层切分)' })"
+Write-Host "  CPU_CACHE_GB  = $CPU_CACHE_GB"
+Write-Host "  HF_TOKEN      = $(if ($env:HF_TOKEN) { '已设置 (' + $env:HF_TOKEN.Substring(0, [Math]::Min(8, $env:HF_TOKEN.Length)) + '...)' } else { '未设置' })"
+Write-Host "=========================================="
 
 Write-Host ("启动: " + ($serverArgs -join ' '))
 Write-Host "就绪后可测试: curl http://localhost:$PORT/health"
